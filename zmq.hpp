@@ -1462,6 +1462,9 @@ ZMQ_DEFINE_INTEGRAL_OPT(ZMQ_BACKLOG, backlog, int);
 #ifdef ZMQ_BINDTODEVICE
 ZMQ_DEFINE_ARRAY_OPT_BINARY(ZMQ_BINDTODEVICE, bindtodevice);
 #endif
+#ifdef ZMQ_BUSY_POLL
+ZMQ_DEFINE_INTEGRAL_BOOL_UNIT_OPT(ZMQ_BUSY_POLL, busy_poll, int);
+#endif
 #ifdef ZMQ_CONFLATE
 ZMQ_DEFINE_INTEGRAL_BOOL_UNIT_OPT(ZMQ_CONFLATE, conflate, int);
 #endif
@@ -2750,7 +2753,7 @@ template<typename T = no_user_data> class poller_t
     {
         int rc = zmq_poller_size(const_cast<void *>(poller_ptr.get()));
         ZMQ_ASSERT(rc >= 0);
-        return static_cast<size_t>(std::max(rc, 0));
+        return static_cast<size_t>((std::max)(rc, 0));
     }
 #endif
 
@@ -2790,6 +2793,85 @@ inline std::ostream &operator<<(std::ostream &os, const message_t &msg)
 {
     return os << msg.str();
 }
+
+#if defined(ZMQ_CPP11) && defined(ZMQ_HAVE_TIMERS)
+
+class timers
+{
+  public:
+    using id_t = int;
+    using fn_t = zmq_timer_fn;
+
+#if CPPZMQ_HAS_OPTIONAL
+    using timeout_result_t = std::optional<std::chrono::milliseconds>;
+#else
+    using timeout_result_t = detail::trivial_optional<std::chrono::milliseconds>;
+#endif
+
+    timers() : _timers(zmq_timers_new())
+    {
+        if (_timers == nullptr)
+            throw error_t();
+    }
+
+    timers(const timers &other) = delete;
+    timers &operator=(const timers &other) = delete;
+
+    ~timers()
+    {
+        int rc = zmq_timers_destroy(&_timers);
+        ZMQ_ASSERT(rc == 0);
+    }
+
+    id_t add(std::chrono::milliseconds interval, zmq_timer_fn handler, void *arg)
+    {
+        id_t timer_id = zmq_timers_add(_timers, interval.count(), handler, arg);
+        if (timer_id == -1)
+            throw zmq::error_t();
+        return timer_id;
+    }
+
+    void cancel(id_t timer_id)
+    {
+        int rc = zmq_timers_cancel(_timers, timer_id);
+        if (rc == -1)
+            throw zmq::error_t();
+    }
+
+    void set_interval(id_t timer_id, std::chrono::milliseconds interval)
+    {
+        int rc = zmq_timers_set_interval(_timers, timer_id, interval.count());
+        if (rc == -1)
+            throw zmq::error_t();
+    }
+
+    void reset(id_t timer_id)
+    {
+        int rc = zmq_timers_reset(_timers, timer_id);
+        if (rc == -1)
+            throw zmq::error_t();
+    }
+
+    timeout_result_t timeout() const
+    {
+        int timeout = zmq_timers_timeout(_timers);
+        if (timeout == -1)
+            return timeout_result_t{};
+        return std::chrono::milliseconds{timeout};
+    }
+
+    void execute()
+    {
+        int rc = zmq_timers_execute(_timers);
+        if (rc == -1)
+            throw zmq::error_t();
+    }
+
+  private:
+    void *_timers;
+};
+
+#endif // defined(ZMQ_CPP11) && defined(ZMQ_HAVE_TIMERS)
 
 } // namespace zmq
 

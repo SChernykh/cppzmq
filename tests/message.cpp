@@ -3,9 +3,9 @@
 
 #if defined(ZMQ_CPP11)
 static_assert(!std::is_copy_constructible<zmq::message_t>::value,
-    "message_t should not be copy-constructible");
+              "message_t should not be copy-constructible");
 static_assert(!std::is_copy_assignable<zmq::message_t>::value,
-    "message_t should not be copy-assignable");
+              "message_t should not be copy-assignable");
 #endif
 #if (__cplusplus >= 201703L)
 static_assert(std::is_nothrow_swappable<zmq::message_t>::value,
@@ -48,6 +48,23 @@ TEST_CASE("message constructor with iterators", "[message]")
     CHECK(0 == memcmp(data, hi_msg.data(), 2));
 }
 
+TEST_CASE("message constructor with ranges", "[message]")
+{
+    SECTION("trivial type")
+    {
+        const std::vector<int> v{1, 2, 3};
+        const zmq::message_t msg(v);
+        CHECK(3u * sizeof(int) == msg.size());
+    }
+    SECTION("char type")
+    {
+        const std::vector<char> hi{'H', 'i'};
+        const zmq::message_t hi_msg(hi);
+        CHECK(2u == hi_msg.size());
+        CHECK(0 == memcmp(data, hi_msg.data(), 2));
+    }
+}
+
 TEST_CASE("message constructor with size", "[message]")
 {
     const zmq::message_t msg(5);
@@ -69,6 +86,10 @@ TEST_CASE("message constructor with char array", "[message]")
     CHECK(0 == memcmp(data, hi_msg.data(), 2));
 }
 
+#ifndef _WIN32
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
 #if defined(ZMQ_CPP11) && !defined(ZMQ_CPP11_PARTIAL)
 TEST_CASE("message constructor with container - deprecated", "[message]")
 {
@@ -76,6 +97,9 @@ TEST_CASE("message constructor with container - deprecated", "[message]")
     REQUIRE(3u == hi_msg.size());
     CHECK(0 == memcmp(data, hi_msg.data(), 3));
 }
+#ifndef _WIN32
+#pragma GCC diagnostic pop
+#endif
 
 TEST_CASE("message constructor with container of trivial data", "[message]")
 {
@@ -189,11 +213,36 @@ TEST_CASE("message to string", "[message]")
     CHECK(b.to_string_view() == "Foo");
 #endif
 
+#ifndef _WIN32
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
 #if defined(ZMQ_CPP11) && !defined(ZMQ_CPP11_PARTIAL)
     const zmq::message_t depr("Foo"); // deprecated
     CHECK(depr.to_string() != "Foo");
     CHECK(depr.to_string() == std::string("Foo", 4));
 #endif
+#ifndef _WIN32
+#pragma GCC diagnostic pop
+#endif
+}
+
+TEST_CASE("message to debug string", "[message]")
+{
+    const zmq::message_t a;
+    const zmq::message_t b("Foo", 3);
+    const zmq::message_t c("ascii\x01\x02\x03%%%\x04\x05\x06###", 17);
+    const zmq::message_t d("\x01\x02\x03|||", 6);
+    CHECK(a.str() == "zmq::message_t [size 000] ()");
+    CHECK(b.str() == "zmq::message_t [size 003] (Foo)");
+    CHECK(c.str() == "zmq::message_t [size 017] (ascii 010203 %%% 040506 ###)");
+    CHECK(d.str() == "zmq::message_t [size 006] (010203 |||)");
+    // With max_size
+    CHECK(a.str(100) == "zmq::message_t [size 000] ()");
+    CHECK(b.str(2) == "zmq::message_t [size 003] (Fo... too big to print)");
+    CHECK(c.str(10)
+          == "zmq::message_t [size 017] (ascii 010203 %%... too big to print)");
+    CHECK(d.str(2) == "zmq::message_t [size 006] (0102... too big to print)");
 }
 
 #if defined(ZMQ_BUILD_DRAFT_API) && ZMQ_VERSION >= ZMQ_MAKE_VERSION(4, 2, 0)

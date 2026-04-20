@@ -483,8 +483,8 @@ class message_t
       typename = typename std::enable_if<detail::is_char_type<Char>::value>::type>
     ZMQ_DEPRECATED("from 4.7.0, use constructors taking iterators, (pointer, size) "
                    "or strings instead")
-    explicit message_t(const Char (&data)[N]) :
-        message_t(detail::ranges::begin(data), detail::ranges::end(data))
+    explicit message_t(const Char (&arr)[N]) :
+        message_t(detail::ranges::begin(arr), detail::ranges::end(arr))
     {
     }
 
@@ -2029,6 +2029,25 @@ class socket_base
     }
 #endif
 
+    send_result_t send_static(const_buffer buf, send_flags flags = send_flags::none)
+    {
+        int nbytes =
+          zmq_send_const(_handle, buf.data(), buf.size(), static_cast<int>(flags));
+        if (nbytes >= 0)
+            return static_cast<size_t>(nbytes);
+        if (zmq_errno() == EAGAIN)
+            return {};
+        throw error_t();
+    }
+
+#if CPPZMQ_HAS_STRING_VIEW
+    send_result_t send_static(std::string_view str,
+                              send_flags flags = send_flags::none)
+    {
+        return send_static(zmq::buffer(str), flags);
+    }
+#endif
+
     ZMQ_CPP11_DEPRECATED(
       "from 4.3.1, use recv taking a mutable_buffer and recv_flags")
     size_t recv(void *buf_, size_t len_, int flags_ = 0)
@@ -2762,6 +2781,24 @@ template<typename T = no_user_data> class poller_t
         }
     }
 
+#if CPPZMQ_HAS_OPTIONAL
+    std::optional<event_type>
+    wait(std::chrono::milliseconds timeout = std::chrono::milliseconds{-1})
+    {
+        event_type event;
+        int rc = zmq_poller_wait(poller_ptr.get(),
+                                 reinterpret_cast<zmq_poller_event_t *>(&event),
+                                 static_cast<long>(timeout.count()));
+        if (rc == -1) {
+            if (zmq_errno() == EAGAIN)
+                return {};
+            else
+                throw error_t();
+        }
+        return event;
+    }
+#endif
+
     template<typename Sequence>
     size_t wait_all(Sequence &poller_events, const std::chrono::milliseconds timeout)
     {
@@ -2891,7 +2928,7 @@ class timers
 
     timeout_result_t timeout() const
     {
-        int timeout = zmq_timers_timeout(_timers);
+        long timeout = zmq_timers_timeout(_timers);
         if (timeout == -1)
             return timeout_result_t{};
         return std::chrono::milliseconds{timeout};
